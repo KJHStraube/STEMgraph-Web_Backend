@@ -1,10 +1,12 @@
-FROM alpine:latest
+FROM python:3.11-slim
+WORKDIR /app
 
-RUN apk add bash curl jq git coreutils github-cli
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-WORKDIR /stemgraph
+COPY . /app
+RUN mkdir -p /data/repos
+VOLUME ["/data"]
 
-COPY /doc/graphContext.json .
-COPY bin/jsonld-parser.sh .
-RUN chmod +x jsonld-parser.sh
-ENTRYPOINT ["./jsonld-parser.sh"]
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

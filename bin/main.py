@@ -10,11 +10,13 @@ import base64, copy, json, os, re, requests, time
 
 ORG = os.environ['GITHUB_ORG']
 PAT_FILE = os.environ['GITHUB_PAT_FILE']
-STORAGE_DIR = os.environ.get('STORAGE_DIR', '/data/repos')
+STORAGE_DIR = os.environ.get('STORAGE_DIR', '/graph-db/repos')
 METADATA_FILE = os.path.join(STORAGE_DIR, 'metadata.json')
-DATABASE_DIR = os.environ.get('DATABASE_DIR', '/data')
-DATABASE_JSON = os.path.join(DATABASE_DIR, 'challenge_db.json')
-CONTEXT_JSON = os.path.join(DATABASE_DIR, 'graphContext.json')
+TEMPLATE_DIR = os.environ.get('TEMPLATE_DIR', '/graph-db/templates')
+LD_CONTEXT_TEMPLATE = os.path.join(TEMPLATE_DIR, 'ld-context.json')
+LD_METADATA_TEMPLATE = os.path.join(TEMPLATE_DIR, 'ld-metadata.json')
+DATABASE_DIR = os.environ.get('DATABASE_DIR', '/graph-db')
+LD_DATABASE = os.path.join(DATABASE_DIR, 'ld-database.json')
 
 # --- to-do: check & put values into env-variables
 # DB_LOC = "/data/jsonld.json"

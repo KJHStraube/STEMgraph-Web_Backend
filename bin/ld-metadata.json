@@ -1,0 +1,9 @@
+{
+  "@id": "https://stemgraph-api.boekelmann.net/getWholeGraph?format=json-ld",
+  "generatedBy": {
+    "@type": "schema:Organization",
+    "schema:name": "STEMgraph",
+    "schema:url": "https://github.com/STEMgraph"
+  },
+  "generatedAt": ""
+}

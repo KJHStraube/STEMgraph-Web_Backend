@@ -1,26 +1,27 @@
-from fastapi import FastAPI
-from fastapi import Query
-from fastapi import status
+from fastapi import BackgroundTasks, FastAPI, Query, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from collections import defaultdict
 from datetime import datetime
-import copy
-import json
+import base64, copy, json, os, re, requests, time
 
 
 # initialize global variables
 
-DB_LOC = "/app/data/jsonld.json"
-CONTEXT_LOC = "/app/data/graphContext.json"
-with open(DB_LOC) as db_file:
-    db = json.load(db_file)
+ORG = os.environ['GITHUB_ORG']
+PAT_FILE = os.environ['GITHUB_PAT_FILE']
+STORAGE_DIR = os.environ.get('STORAGE_DIR', '/data/repos')
+METADATA_FILE = os.path.join(STORAGE_DIR, 'metadata.json')
+DATABASE_DIR = os.environ.get('DATABASE_DIR', '/data')
+DATABASE_JSON = os.path.join(DATABASE_DIR, 'challenge_db.json')
+CONTEXT_JSON = os.path.join(DATABASE_DIR, 'graphContext.json')
 
 
-# here comes the api code
+# setup the api object
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["https://stemgraph.boekelmann.net"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-    
+
+
 @app.get("/")
 def read_root():
     """Returns a greeting."""
@@ -121,15 +122,57 @@ def get_statistics():
     stats["@type"] = "Statistics"
     stats["keywordCountDistinct"] = len(get_list("keywords"))
     stats["keywordCountTotal"] = sum(get_count("keywords").values())
-    stats["nodeCount"] = len(db["@graph"])
+    wholeGraph = get_whole_graph()
+    stats["nodeCount"] = len(wholeGraph["@graph"])
     return stats
 
 @app.get("/getWholeGraph")
 def get_whole_graph():
     """Returns the whole graph, i.e. database."""
-    wholeGraph = copy.deepcopy(db)
-    wholeGraph["generatedAt"] = now()
+    with open(DATABASE_JSON, 'r', encoding='utf-8') as f:
+        wholeGraph = json.load(f)
     return wholeGraph 
+
+@app.get("/getStartNodes")
+def get_start_nodes():
+    """Returns all nodes that have no dependencies (entry points / starting lessons)."""
+    # Start Nodes = Nodes ohne dependsOn (keine Voraussetzungen)
+    starts = init_graph()
+    db = get_whole_graph()
+    for ex in db["@graph"]:
+        deps = ex.get("dependsOn", [])
+        if not deps or len(deps) == 0:
+            starts["@graph"].append(ex)
+    return starts
+
+@app.get("/getEndNodes")
+def get_end_nodes():
+    """Returns all nodes that are not referenced by others (end points / final lessons)."""
+    # Sammle alle IDs die als Dependency referenziert werden
+    referenced_ids = set()
+    db = get_whole_graph()
+    for ex in db["@graph"]:
+        if ex.get("dependsOn"):
+            for dep in ex["dependsOn"]:
+                if isinstance(dep, str):
+                    referenced_ids.add(dep)
+                elif isinstance(dep, dict):
+                    if dep.get("@id"):
+                        referenced_ids.add(dep["@id"])
+                    if dep.get("oneOf"):
+                        for alt in dep["oneOf"]:
+                            referenced_ids.add(alt)
+    # End Nodes = Nodes die von niemandem referenziert werden
+    ends = init_graph()
+    for ex in db["@graph"]:
+        if ex["@id"] not in referenced_ids:
+            ends["@graph"].append(ex)
+    return ends
+
+@app.post("/refreshDatabase")
+async def refresh_database(background_tasks: BackgroundTasks):
+    background_tasks.add_task(refresh_challenge_db_task)
+    return {"status": "refresh challenge database started"}
 
 
 # auxiliary graph manipulation subroutines
@@ -150,6 +193,7 @@ def get_count(field: str, subfield: str = None, lowercase: bool = True):
     - lowercase: normalize values to lowercase if True
     """
     counts = defaultdict(int)
+    db = get_whole_graph()
     for ex in db["@graph"]:
         if ex.get(field) is not None:
             field_values = ex[field]
@@ -173,6 +217,7 @@ def get_list(field: str, subfield: str = None, lowercase: bool = True):
     - lowercase: normalize values to lowercase if True
     """
     values = set()
+    db = get_whole_graph()
     for ex in db["@graph"]:
         if ex.get(field) is not None:
             field_values = ex[field]
@@ -200,6 +245,7 @@ def get_exercises_by_tag(field: str, search: str, subfield: str = None, match: s
     if lowercase:
         search = search.lower()
     exTagged = init_graph()
+    db = get_whole_graph()
     for ex in db["@graph"]:
         if ex.get(field) is not None:
             field_values = ex[field]
@@ -224,6 +270,7 @@ def get_exercises_by_tag(field: str, search: str, subfield: str = None, match: s
 
 def get_exercise_node(uuid: str):
     """Get the list element with the given uuid as @id."""
+    db = get_whole_graph()
     for ex in db["@graph"]:
         if ex["@id"] == uuid:
             return ex
@@ -254,17 +301,17 @@ def add_exercise(data, uuid, visited):
 
 def add_graph_context(data):
     """Gets context data from local context file and adds it to the data."""
-    with open(CONTEXT_LOC) as context_file:
+    with open(CONTEXT_JSON) as context_file:
         context = json.load(context_file)
     data["@context"] = context["@context"]
 
 def add_graph_metadata(data):
     """Adds metadata (url, created at & by) to the data."""
-    data["@id"] = "https://example.com/"
+    data["@id"] = "https://stemgraph-api.boekelmann.net/"
     data["generatedBy"] = {}
     data["generatedBy"]["@type"] = "schema:Organization"
-    data["generatedBy"]["schema:name"] = "STEMgraph API"
-    data["generatedBy"]["schema:url"] = "https://github.com/STEMgraph/API"
+    data["generatedBy"]["schema:name"] = "STEMgraph"
+    data["generatedBy"]["schema:url"] = "https://github.com/STEMgraph"
     data["generatedAt"] = now()
 
 
@@ -280,3 +327,158 @@ def error_notFound(field, value):
         status_code=status.HTTP_404_NOT_FOUND,
         content={"error": f"No exercises found for {field}: '{value}'"}
     )
+
+
+# auxiliary functions to build / update the database
+
+def get_pat():
+    with open(PAT_FILE, 'r') as f:
+        return f.read().strip()
+
+def list_org_repos(token):
+    url = f'https://api.github.com/orgs/{ORG}/repos?per_page=100'
+    headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
+    repos = []
+    while url:
+        r = requests.get(url, headers=headers); r.raise_for_status()
+        repos.extend(r.json())
+        url = r.links.get('next', {}).get('url')
+    return repos
+
+def latest_commit_sha(token, owner, repo, branch):
+    url = f'https://api.github.com/repos/{owner}/{repo}/commits/{branch}'
+    headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
+    r = requests.get(url, headers=headers); r.raise_for_status()
+    return r.json()['sha']
+
+def fetch_readme_text(token, owner, repo):
+    url = f'https://api.github.com/repos/{owner}/{repo}/readme'
+    headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
+    r = requests.get(url, headers=headers)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    data = r.json()
+    return base64.b64decode(data['content']).decode('utf-8')
+
+def extract_json_from_readme(readme_text):
+    start = readme_text.find("<!---")
+    end = readme_text.find("--->", start)
+    if start == -1 or end == -1:
+        return None
+    block = readme_text[start+5:end].strip()
+    try:
+        return json.loads(block)
+    except json.JSONDecodeError:
+        return None
+
+def ensure_metadata():
+    os.makedirs(STORAGE_DIR, exist_ok=True)
+    if os.path.exists(METADATA_FILE):
+        with open(METADATA_FILE) as f:
+            return json.load(f)
+    return {}
+
+def save_metadata(m):
+    with open(METADATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(m, f, ensure_ascii=False, indent=2)
+
+def refresh_challenge_db_task():
+    token = get_pat()
+    repos = list_org_repos(token)
+    meta = ensure_metadata()
+    uuid_pattern = re.compile(
+        r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    )
+    for r in repos:
+        name = r['name']
+        owner, branch = r['owner']['login'], r['default_branch']
+        sha = latest_commit_sha(token, owner, name, branch)
+        print(f"Checking repo {name}, sha={sha}")
+        if not uuid_pattern.match(name.lower()):
+            print("Skipped: not UUID")
+            continue
+        if meta.get(name, {}).get('sha') != sha:
+            readme_text = fetch_readme_text(token, owner, name)
+            if readme_text:
+                json_obj = extract_json_from_readme(readme_text)
+                if json_obj:
+                    filename = os.path.join(STORAGE_DIR, f'{name}__{sha}.json')
+                    tmp = filename + '.tmp'
+                    with open(tmp, 'w', encoding='utf-8') as f:
+                        json.dump(json_obj, f, ensure_ascii=False, indent=2)
+                    os.replace(tmp, filename)
+                    meta[name] = {
+                        'sha': sha,
+                        'downloaded_at': int(time.time()),
+                        'path': filename
+                    }
+            if not readme_text:
+                print("Skipped: no README")
+            elif not json_obj:
+                print("Skipped: no valid JSON block")
+            else:
+                print("Saved JSON for", name)
+    save_metadata(meta)
+    print("All metadata from STEMgraph challenges fetched.")
+    createdb_jsonld()
+    print("Database created as JSON-LD.")
+
+
+# routines to create the json-ld-database from the challenge-metadata files
+
+def createdb_jsonld():
+    """Creates challenges-ld.json from challenges' metadata."""
+    db_jsonld = {}
+    add_ld_context(db_jsonld)
+    add_ld_metadata(db_jsonld)
+    nodes = []
+    for fname in os.listdir(STORAGE_DIR):
+        if fname != 'metadata.json':
+            file = os.path.join(STORAGE_DIR, fname)
+            with open(file) as f:
+                challenge_metadata= json.load(f)
+            node = transform_challenge_metadata(challenge_metadata) 
+            nodes.append(node)
+    db_jsonld["@graph"] = nodes
+    with open(DATABASE_JSON, 'w', encoding='utf-8') as f:
+        json.dump(db_jsonld, f, ensure_ascii=False, indent=2)
+
+def add_ld_context(db_jsonld):
+    """Gets context data from local context file."""
+    with open(CONTEXT_JSON) as context_file:
+        context = json.load(context_file)
+    db_jsonld["@context"] = context["@context"]
+
+def add_ld_metadata(db_jsonld):
+    """Creates metadata (url, created at & by)."""
+    db_jsonld["@id"] = "https://stemgraph-api.boekelmann.net/getWholeGraph"
+    db_jsonld["generatedBy"] = {}
+    db_jsonld["generatedBy"]["@type"] = "schema:Organization"
+    db_jsonld["generatedBy"]["schema:name"] = "STEMgraph"
+    db_jsonld["generatedBy"]["schema:url"] = "https://github.com/STEMgraph"
+    db_jsonld["generatedAt"] = now()
+
+def transform_challenge_metadata(md_json):
+    """Transforms challenge metadata into a json-ld node."""
+    node = {
+        "@id": md_json["id"],
+        "@type": "Exercise",
+        "learningResourceType": "Exercise"
+    }
+    if "teaches" in md_json:
+        node["teaches"] = md_json["teaches"]
+    if "depends_on" in md_json:
+        node["dependsOn"] = md_json["depends_on"]
+    if "author" in md_json:
+        author_list = md_json["author"]
+        if isinstance(author_list, str):
+            author_list = [author_list]
+        node["author"] = []
+        for author in author_list:
+            node["author"].append({"@type": "Person", "name": author})
+    if "first_used" in md_json:
+        node["publishedAt"] = md_json["first_used"]
+    if "keywords" in md_json:
+        node["keywords"] = md_json["keywords"]
+    return node

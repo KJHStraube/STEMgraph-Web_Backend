@@ -1,48 +1,18 @@
 services:
-  setup:
-    image: dockerreg.gruppe.ai/stemgraph-setup:1.0.0
+  stemgraph_api:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    secrets:
+      - github_pat
     volumes:
-      - data-volume:/stemgraph
-      - gh-credentials:/root/.config/gh
-    entrypoint: /bin/bash
-    command: -c "gh auth login"
-    stdin_open: true
-    tty: true
-    profiles: ["setup"]
+      - data:/data
+    restart: unless-stopped
 
-  stemgraph-parser:
-    image: dockerreg.gruppe.ai/stemgraph-setup:1.0.0
-    volumes:
-      - data-volume:/stemgraph
-      - gh-credentials:/root/.config/gh
-
-  api:
-    image: dockerreg.gruppe.ai/stemgraph-api:1.0.0
-    expose:
-      - "8000"
-    volumes:
-      - data-volume:/app/data:ro
-    depends_on:
-      stemgraph-parser:
-        condition: service_completed_successfully
-      copy-graph:
-        condition: service_completed_successfully
-    restart: on-failure
-    networks:
-      frontproxy_fnet:
-        ipv4_address: 172.20.20.30
-      backend:
+secrets:
+  github_pat:
+    file: ./secrets/github.pat
 
 volumes:
-  data-volume:
-  gh-credentials:
-
-
-networks:
-  frontproxy_fnet:
-    external: true
-  backend:
-    name: stemgraph-api_backend
-    driver: bridge
-    driver_opts:
-      com.docker.network.enable_ipv6: "false"
+  data:

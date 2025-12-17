@@ -138,6 +138,40 @@ def get_whole_graph():
     wholeGraph["generatedAt"] = now()
     return wholeGraph 
 
+@app.get("/getStartNodes")
+def get_start_nodes():
+    """Returns all nodes that have no dependencies (entry points / starting lessons)."""
+    # Start Nodes = Nodes ohne dependsOn (keine Voraussetzungen)
+    starts = init_graph()
+    for ex in db["@graph"]:
+        deps = ex.get("dependsOn", [])
+        if not deps or len(deps) == 0:
+            starts["@graph"].append(ex)
+    return starts
+
+@app.get("/getEndNodes")
+def get_end_nodes():
+    """Returns all nodes that are not referenced by others (end points / final lessons)."""
+    # Sammle alle IDs die als Dependency referenziert werden
+    referenced_ids = set()
+    for ex in db["@graph"]:
+        if ex.get("dependsOn"):
+            for dep in ex["dependsOn"]:
+                if isinstance(dep, str):
+                    referenced_ids.add(dep)
+                elif isinstance(dep, dict):
+                    if dep.get("@id"):
+                        referenced_ids.add(dep["@id"])
+                    if dep.get("oneOf"):
+                        for alt in dep["oneOf"]:
+                            referenced_ids.add(alt)
+    # End Nodes = Nodes die von niemandem referenziert werden
+    ends = init_graph()
+    for ex in db["@graph"]:
+        if ex["@id"] not in referenced_ids:
+            ends["@graph"].append(ex)
+    return ends
+
 @app.post("/refreshDatabase")
 async def refresh_database(background_tasks: BackgroundTasks):
     background_tasks.add_task(refresh_challenge_db_task)

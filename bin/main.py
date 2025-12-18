@@ -16,6 +16,15 @@ DATABASE_DIR = os.environ.get('DATABASE_DIR', '/data')
 DATABASE_JSON = os.path.join(DATABASE_DIR, 'challenge_db.json')
 CONTEXT_JSON = os.path.join(DATABASE_DIR, 'graphContext.json')
 
+ORG = os.environ['GITHUB_ORG']
+PAT_FILE = os.environ['GITHUB_PAT_FILE']
+STORAGE_DIR = os.environ.get('STORAGE_DIR', '/graph-db/repos')
+METADATA_FILE = os.path.join(STORAGE_DIR, 'metadata.json')
+TEMPLATE_DIR = os.environ.get('TEMPLATE_DIR', '/graph-db/templates')
+LD_CONTEXT_TEMPLATE = os.path.join(TEMPLATE_DIR, 'ld-context.json')
+LD_METADATA_TEMPLATE = os.path.join(TEMPLATE_DIR, 'ld-metadata.json')
+DATABASE_DIR = os.environ.get('DATABASE_DIR', '/graph-db')
+LD_DATABASE = os.path.join(DATABASE_DIR, 'ld-database.json')
 
 # setup the api object
 app = FastAPI()
@@ -129,7 +138,7 @@ def get_statistics():
 @app.get("/getWholeGraph")
 def get_whole_graph():
     """Returns the whole graph, i.e. database."""
-    with open(DATABASE_JSON, 'r', encoding='utf-8') as f:
+    with open(LD_DATABASE, 'r', encoding='utf-8') as f:
         wholeGraph = json.load(f)
     return wholeGraph 
 
@@ -301,7 +310,7 @@ def add_exercise(data, uuid, visited):
 
 def add_graph_context(data):
     """Gets context data from local context file and adds it to the data."""
-    with open(CONTEXT_JSON) as context_file:
+    with open(LD_CONTEXT_TEMPLATE) as context_file:
         context = json.load(context_file)
     data["@context"] = context["@context"]
 
@@ -441,12 +450,12 @@ def createdb_jsonld():
             node = transform_challenge_metadata(challenge_metadata) 
             nodes.append(node)
     db_jsonld["@graph"] = nodes
-    with open(DATABASE_JSON, 'w', encoding='utf-8') as f:
+    with open(LD_DATABASE, 'w', encoding='utf-8') as f:
         json.dump(db_jsonld, f, ensure_ascii=False, indent=2)
 
 def add_ld_context(db_jsonld):
     """Gets context data from local context file."""
-    with open(CONTEXT_JSON) as context_file:
+    with open(LD_CONTEXT_TEMPLATE) as context_file:
         context = json.load(context_file)
     db_jsonld["@context"] = context["@context"]
 

@@ -1,5 +1,5 @@
 {
-  "@id": "https://stemgraph-api.boekelmann.net",
+  "@id": "https://stemgraph-api.boekelmann.net/getWholeGraph",
   "generatedBy": {
     "@type": "schema:Organization",
     "schema:name": "STEMgraph",

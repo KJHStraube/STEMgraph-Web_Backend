@@ -72,49 +72,75 @@ def get_exercise(uuid: str, format: str = Query("json", enum=["json", "json-ld"]
     """Returns a graph with one single exercise node."""
     if format == "json":
         ex = init_nl_graph()
-        ex["nodes"].append(get_nl_exercise_node(uuid))
+        node = get_nl_exercise_node(uuid)
+        if isinstance(node, JSONResponse):
+            return node
+        ex["nodes"].append(node)
         add_nl_links(ex)
         return JSONResponse(content=ex, media_type="application/json")
     elif format == "json-ld":
         ex = init_ld_graph()
-        ex["@graph"].append(get_ld_exercise_node(uuid))
+        node = get_ld_exercise_node(uuid)
+        if isinstance(node, JSONResponse):
+            return node
+        ex["@graph"].append(node)
         return JSONResponse(content=ex, media_type="application/ld+json")
 
 @app.get("/getExercisesByAuthor/{name}")
 def get_exercises_by_author(
     name: str,
-    match: str = Query("exact", regex="^(exact|partial)$")
+    match: str = Query("exact", regex="^(exact|partial)$"),
+    format: str = Query("json", enum=["json", "json-ld"])
 ):
     """
     Returns a graph with all exercises tagged with a specific author.
     The 'match' parameter controls whether the search is exact or partial.
     """
-    exTagged = get_exercises_by_tag("author", name, subfield="name", match=match)
-    if not exTagged["@graph"]:
-        return error_notFound("author", name)
-    return exTagged
+    if format == "json":
+        exTagged = get_nl_exercises_by_tag("author", name, subfield="name", match=match)
+        if not exTagged["nodes"]:
+            return error_notFound("author", name)
+        return JSONResponse(content=exTagged, media_type="application/json")
+    elif format == "json-ld":
+        exTagged = get_ld_exercises_by_tag("author", name, subfield="name", match=match)
+        if not exTagged["@graph"]:
+            return error_notFound("author", name)
+        return JSONResponse(content=exTagged, media_type="application/ld+json")
 
 @app.get("/getExercisesByKeyword/{keyword}")
 def get_exercises_by_keyword(
     keyword: str,
-    match: str = Query("exact", regex="^(exact|partial)$")
+    match: str = Query("exact", regex="^(exact|partial)$"),
+    format: str = Query("json", enum=["json", "json-ld"])
 ):
     """
     Returns a graph with all exercises tagged with a specific keyword.
     The 'match' parameter controls whether the search is exact or partial.
     """
-    exTagged = get_exercises_by_tag("keywords", keyword, match=match)
-    if not exTagged["@graph"]:
-        return error_notFound("keyword", keyword)
-    return exTagged
+    if format == "json":
+        exTagged = get_nl_exercises_by_tag("keywords", keyword, match=match)
+        if not exTagged["nodes"]:
+            return error_notFound("keyword", keyword)
+        return JSONResponse(content=exTagged, media_type="application/json")
+    elif format == "json-ld":
+        exTagged = get_ld_exercises_by_tag("keywords", keyword, match=match)
+        if not exTagged["@graph"]:
+            return error_notFound("keyword", keyword)
+        return JSONResponse(content=exTagged, media_type="application/ld+json")
 
 @app.get("/getExercisesByTopic/{topic}")
-def get_exercises_by_topic(topic: str):
+def get_exercises_by_topic(topic: str, format: str = Query("json", enum=["json", "json-ld"])):
     """ Returns a graph with all exercises which include "topic" in the 'teaches' field."""
-    exTopic = get_exercises_by_tag("teaches", topic, match="partial")
-    if not exTopic["@graph"]:
-        return error_notFound("teaches", topic)
-    return exTopic
+    if format == "json":
+        exTopic = get_nl_exercises_by_tag("teaches", topic, match="partial")
+        if not exTopic["nodes"]:
+            return error_notFound("teaches", topic)
+        return JSONResponse(content=exTopic, media_type="application/json")
+    elif format == "json-ld":
+        exTopic = get_ld_exercises_by_tag("teaches", topic, match="partial")
+        if not exTopic["@graph"]:
+            return error_notFound("teaches", topic)
+        return JSONResponse(content=exTopic, media_type="application/ld+json")
 
 @app.get("/getKeywordCount")
 def get_keyword_count():
@@ -137,9 +163,13 @@ def get_path_to_exercise(uuid: str, format: str = Query("json", enum=["json", "j
     """Returns a graph with all nodes leading to the given one."""
     if format == "json":
         path = get_nl_path_to_exercise(uuid)
+        if isinstance(path, JSONResponse):
+            return path
         return JSONResponse(content=path, media_type="application/json")
     elif format == "json-ld":
         path = get_ld_path_to_exercise(uuid)
+        if isinstance(path, JSONResponse):
+            return path
         return JSONResponse(content=path, media_type="application/ld+json")
 
 @app.get("/getStartNodes")
@@ -287,6 +317,42 @@ def expand_nl_dependencies(data, curEx, visited):
                     data["links"].append(link)
                     expand_nl_dependencies(data, source_node, visited)
 
+def get_nl_exercises_by_tag(field: str, search: str, subfield: str = None, match: str = "exact", lowercase: bool = True):
+    """
+    Returns a nodes-links-graph with all exercises where the given field contains the given value.
+    - field: top-level field in each exercise (e.g. "keywords", "author")
+    - value: the search term
+    - subfield: optional subfield if field is a dict (e.g. "name")
+    - match: "exact" or "partial"
+    - lowercase: normalize values to lowercase if True
+    """
+    if lowercase:
+        search = search.lower()
+    exTagged = init_nl_graph()
+    db = get_nl_graph()
+    for ex in db["nodes"]:
+        if ex.get(field) is not None:
+            field_values = ex[field]
+            if isinstance(field_values, str) or isinstance(field_values, dict):
+                field_values = [field_values]
+            for val in field_values:
+                if isinstance(val, dict) and subfield:
+                    val = val.get(subfield)
+                if val is None:
+                    continue
+                if isinstance(val, str) and lowercase:
+                    valCmp = val.lower()
+                else:
+                    valCmp = val
+                if match == "exact" and search == valCmp:
+                    exTagged["nodes"].append(ex)
+                    break
+                elif match == "partial" and isinstance(valCmp, str) and search in valCmp:
+                    exTagged["nodes"].append(ex)
+                    break
+    add_nl_links(exTagged)
+    return exTagged
+
 
 # auxiliary graph manipulation subroutines for JSON-LD graphs
 
@@ -304,7 +370,7 @@ def init_ld_graph():
     graph["@graph"] = []
     return graph
 
-def get_exercises_by_tag(field: str, search: str, subfield: str = None, match: str = "exact", lowercase: bool = True):
+def get_ld_exercises_by_tag(field: str, search: str, subfield: str = None, match: str = "exact", lowercase: bool = True):
     """
     Returns a graph with all exercises where the given field contains the given value.
     - field: top-level field in each exercise (e.g. "keywords", "author")

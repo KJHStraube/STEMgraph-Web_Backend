@@ -45,15 +45,40 @@ def get_author_list():
     authorList["authors"] = get_list("author", subfield="name", lowercase=False)
     return authorList
 
+@app.get("/getEndNodes")
+def get_end_nodes():
+    """Returns all nodes that are not referenced by others (end points / final lessons)."""
+    referenced_ids = set()
+    db = get_ld_graph()
+    for ex in db["@graph"]:
+        if ex.get("dependsOn"):
+            for dep in ex["dependsOn"]:
+                if isinstance(dep, str):
+                    referenced_ids.add(dep)
+                elif isinstance(dep, dict):
+                    if dep.get("@id"):
+                        referenced_ids.add(dep["@id"])
+                    if dep.get("oneOf"):
+                        for alt in dep["oneOf"]:
+                            referenced_ids.add(alt)
+    ends = init_ld_graph()
+    for ex in db["@graph"]:
+        if ex["@id"] not in referenced_ids:
+            ends["@graph"].append(ex)
+    return ends
+
 @app.get("/getExercise/{uuid}")
-def get_exercise(uuid: str):
+def get_exercise(uuid: str, format: str = Query("json", enum=["json", "json-ld"])):
     """Returns a graph with one single exercise node."""
-    ex = get_exercise_node(uuid)
-    if ex is None:
-        return error_notFound("uuid", uuid)
-    exercise = init_graph()
-    exercise["@graph"].append(ex)
-    return exercise
+    if format == "json":
+        ex = init_nl_graph()
+        ex["nodes"].append(get_nl_exercise_node(uuid))
+        add_nl_links(ex)
+        return JSONResponse(content=ex, media_type="application/json")
+    elif format == "json-ld":
+        ex = init_ld_graph()
+        ex["@graph"].append(get_ld_exercise_node(uuid))
+        return JSONResponse(content=ex, media_type="application/ld+json")
 
 @app.get("/getExercisesByAuthor/{name}")
 def get_exercises_by_author(
@@ -108,13 +133,25 @@ def get_keyword_list():
     return keywordList
 
 @app.get("/getPathToExercise/{uuid}")
-def get_path_to_exercise(uuid: str):
+def get_path_to_exercise(uuid: str, format: str = Query("json", enum=["json", "json-ld"])):
     """Returns a graph with all nodes leading to the given one."""
-    path = get_exercise(uuid)
-    if not isinstance(path, JSONResponse) and path.get("@graph"):
-        visited = None
-        expand_dependencies(path, path["@graph"][0], visited)
-    return path
+    if format == "json":
+        path = get_nl_path_to_exercise(uuid)
+        return JSONResponse(content=path, media_type="application/json")
+    elif format == "json-ld":
+        path = get_ld_path_to_exercise(uuid)
+        return JSONResponse(content=path, media_type="application/ld+json")
+
+@app.get("/getStartNodes")
+def get_start_nodes():
+    """Returns all nodes that have no dependencies (entry points / starting lessons)."""
+    starts = init_ld_graph()
+    db = get_ld_graph()
+    for ex in db["@graph"]:
+        deps = ex.get("dependsOn", [])
+        if not deps or len(deps) == 0:
+            starts["@graph"].append(ex)
+    return starts
 
 @app.get("/getStatistics")
 def get_statistics():
@@ -124,52 +161,19 @@ def get_statistics():
     stats["@type"] = "Statistics"
     stats["keywordCountDistinct"] = len(get_list("keywords"))
     stats["keywordCountTotal"] = sum(get_count("keywords").values())
-    wholeGraph = get_whole_graph()
+    wholeGraph = get_ld_graph()
     stats["nodeCount"] = len(wholeGraph["@graph"])
     return stats
 
 @app.get("/getWholeGraph")
-def get_whole_graph():
+def get_whole_graph(format: str = Query("json", enum=["json", "json-ld"])):
     """Returns the whole graph, i.e. database."""
-    with open(LD_DATABASE, 'r', encoding='utf-8') as f:
-        wholeGraph = json.load(f)
-    return wholeGraph 
-
-@app.get("/getStartNodes")
-def get_start_nodes():
-    """Returns all nodes that have no dependencies (entry points / starting lessons)."""
-    # Start Nodes = Nodes ohne dependsOn (keine Voraussetzungen)
-    starts = init_graph()
-    db = get_whole_graph()
-    for ex in db["@graph"]:
-        deps = ex.get("dependsOn", [])
-        if not deps or len(deps) == 0:
-            starts["@graph"].append(ex)
-    return starts
-
-@app.get("/getEndNodes")
-def get_end_nodes():
-    """Returns all nodes that are not referenced by others (end points / final lessons)."""
-    # Sammle alle IDs die als Dependency referenziert werden
-    referenced_ids = set()
-    db = get_whole_graph()
-    for ex in db["@graph"]:
-        if ex.get("dependsOn"):
-            for dep in ex["dependsOn"]:
-                if isinstance(dep, str):
-                    referenced_ids.add(dep)
-                elif isinstance(dep, dict):
-                    if dep.get("@id"):
-                        referenced_ids.add(dep["@id"])
-                    if dep.get("oneOf"):
-                        for alt in dep["oneOf"]:
-                            referenced_ids.add(alt)
-    # End Nodes = Nodes die von niemandem referenziert werden
-    ends = init_graph()
-    for ex in db["@graph"]:
-        if ex["@id"] not in referenced_ids:
-            ends["@graph"].append(ex)
-    return ends
+    if format == "json":
+        wholeGraph = get_nl_graph()
+        return JSONResponse(content=wholeGraph, media_type="application/json")
+    elif format == "json-ld":
+        wholeGraph = get_ld_graph()
+        return JSONResponse(content=wholeGraph, media_type="application/ld+json") 
 
 @app.post("/refreshDatabase")
 async def refresh_database(background_tasks: BackgroundTasks):
@@ -177,15 +181,7 @@ async def refresh_database(background_tasks: BackgroundTasks):
     return {"status": "refresh challenge database started"}
 
 
-# auxiliary graph manipulation subroutines
-
-def init_graph():
-    """Returns an empty graph framework."""
-    graph = {}
-    add_ld_context(graph)
-    add_ld_metadata(graph)
-    graph["@graph"] = []
-    return graph
+# auxiliary functions to get lists and counts of tags
 
 def get_count(field: str, subfield: str = None, lowercase: bool = True):
     """
@@ -195,7 +191,7 @@ def get_count(field: str, subfield: str = None, lowercase: bool = True):
     - lowercase: normalize values to lowercase if True
     """
     counts = defaultdict(int)
-    db = get_whole_graph()
+    db = get_ld_graph()
     for ex in db["@graph"]:
         if ex.get(field) is not None:
             field_values = ex[field]
@@ -219,7 +215,7 @@ def get_list(field: str, subfield: str = None, lowercase: bool = True):
     - lowercase: normalize values to lowercase if True
     """
     values = set()
-    db = get_whole_graph()
+    db = get_ld_graph()
     for ex in db["@graph"]:
         if ex.get(field) is not None:
             field_values = ex[field]
@@ -235,6 +231,79 @@ def get_list(field: str, subfield: str = None, lowercase: bool = True):
                 values.add(value)
     return sorted(list(values))
 
+
+# auxiliary graph manipulation subroutines for graphs in nodes-links JSON format
+
+def get_nl_graph():
+    """Loads and returns the whole graph framework from the nodes-links JSON database."""
+    with open(NL_DATABASE, 'r', encoding='utf-8') as f:
+        wholeGraph = json.load(f)
+    return wholeGraph
+
+def init_nl_graph():
+    """Returns an empty nodes-links graph framework."""
+    graph = {"nodes": [], "links": []}
+    return graph
+
+def get_nl_exercise_node(uuid: str):
+    """Get the list element with the given uuid from the nodes-links JSON database."""
+    db = get_nl_graph()
+    for ex in db["nodes"]:
+        if ex["id"] == uuid:
+            return ex
+    return error_notFound("uuid", uuid)
+
+def add_nl_links(graph: str):
+    """Add links for the nodes in the given nodes-links graph."""
+    db = get_nl_graph()
+    node_ids = {node["id"] for node in graph["nodes"]}
+    for link in db["links"]:
+        if link["source"] in node_ids or link["target"] in node_ids:
+            graph["links"].append(link)
+
+def get_nl_path_to_exercise(uuid: str):
+    """Returns a graph in nodes-links format with all nodes leading to the given one."""
+    path = init_nl_graph()
+    node = get_nl_exercise_node(uuid)
+    if not isinstance(node, JSONResponse):
+        path["nodes"].append(node)
+        visited = None
+        expand_nl_dependencies(path, node, visited)
+    return path
+
+def expand_nl_dependencies(data, curEx, visited):
+    """Add the current exercise's dependencies to the nodes-links graph."""
+    if visited is None:
+        visited = set()
+    db = get_nl_graph()
+    for link in db["links"]:
+        if link["target"] == curEx["id"]:
+            source_id = link["source"]
+            if source_id not in visited:
+                visited.add(source_id)
+                source_node = get_nl_exercise_node(source_id)
+                if not isinstance(source_node, JSONResponse):
+                    data["nodes"].append(source_node)
+                    data["links"].append(link)
+                    expand_nl_dependencies(data, source_node, visited)
+
+
+# auxiliary graph manipulation subroutines for JSON-LD graphs
+
+def get_ld_graph():
+    """Loads and returns the whole graph framework from the JSON-LD database."""
+    with open(LD_DATABASE, 'r', encoding='utf-8') as f:
+        wholeGraph = json.load(f)
+    return wholeGraph
+
+def init_ld_graph():
+    """Returns an empty JSON-LD graph framework."""
+    graph = {}
+    add_ld_context(graph)
+    add_ld_metadata(graph)
+    graph["@graph"] = []
+    return graph
+
 def get_exercises_by_tag(field: str, search: str, subfield: str = None, match: str = "exact", lowercase: bool = True):
     """
     Returns a graph with all exercises where the given field contains the given value.
@@ -246,8 +315,8 @@ def get_exercises_by_tag(field: str, search: str, subfield: str = None, match: s
     """
     if lowercase:
         search = search.lower()
-    exTagged = init_graph()
-    db = get_whole_graph()
+    exTagged = init_ld_graph()
+    db = get_ld_graph()
     for ex in db["@graph"]:
         if ex.get(field) is not None:
             field_values = ex[field]
@@ -270,36 +339,45 @@ def get_exercises_by_tag(field: str, search: str, subfield: str = None, match: s
                     break
     return exTagged
 
-def get_exercise_node(uuid: str):
-    """Get the list element with the given uuid as @id."""
-    db = get_whole_graph()
+def get_ld_exercise_node(uuid: str):
+    """Get the list element with the given uuid from the JSON-LD database."""
+    db = get_ld_graph()
     for ex in db["@graph"]:
         if ex["@id"] == uuid:
             return ex
-    return None
+    return error_notFound("uuid", uuid)
 
-def expand_dependencies(data, curEx, visited):
-    """Add the current exercise's dependencies to the graph."""
+def get_ld_path_to_exercise(uuid: str):
+    """Returns a graph in JSON-LD format with all nodes leading to the given one."""
+    path = init_ld_graph()
+    path["@graph"].append(get_ld_exercise_node(uuid))
+    if not isinstance(path, JSONResponse) and path.get("@graph"):
+        visited = None
+        expand_ld_dependencies(path, path["@graph"][0], visited)
+    return path
+
+def expand_ld_dependencies(data, curEx, visited):
+    """Add the current exercise's dependencies to the JSON-LD graph."""
     if visited is None:
         visited = set()
     if curEx.get("dependsOn") is not None:
         for dep in curEx["dependsOn"]:
             if isinstance(dep, str):
-                add_exercise(data, dep, visited)
+                add_ld_exercise(data, dep, visited)
             elif isinstance(dep, dict) and dep.get("oneOf"):
                 for alt in dep["oneOf"]:
-                    add_exercise(data, alt, visited)
+                    add_ld_exercise(data, alt, visited)
             else:
                 print("unexpected dependency structure in ", curEx["@id"], ": ", dep)
 
-def add_exercise(data, uuid, visited):
-    """Adds an exercise to the data structure."""
+def add_ld_exercise(data, uuid, visited):
+    """Adds an exercise to the JSON-LD data structure."""
     if uuid not in visited:
         visited.add(uuid)
-        ex = get_exercise_node(uuid)
-        if ex is not None:
+        ex = get_ld_exercise_node(uuid)
+        if not isinstance(ex, JSONResponse):
             data["@graph"].append(ex)
-            expand_dependencies(data, ex, visited)
+            expand_ld_dependencies(data, ex, visited)
 
 
 # lightweight and error functions
@@ -316,7 +394,7 @@ def error_notFound(field, value):
     )
 
 
-# auxiliary functions to build / update the database
+# auxiliary functions to build / update the database cache
 
 def get_pat():
     with open(PAT_FILE, 'r') as f:
@@ -518,9 +596,12 @@ def get_links_from_challenge_metadata(md_json):
     links = []
     if "depends_on" in md_json:
         for dep in md_json["depends_on"]:
-            link = {
-                "source": dep,
-                "target": md_json["id"]
-            }
+            if isinstance(dep, list):
+                pass  # should not be expected, but ignore for now
+            else:
+                link = {
+                    "source": dep,
+                    "target": md_json["id"]
+                }
             links.append(link)
     return links

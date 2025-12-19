@@ -4,8 +4,6 @@ services:
     env_file: .env
     expose:
       - "8000"
-    secrets:
-      - github-pat
     volumes:
       - graph-db:/graph-db
     restart: unless-stopped
@@ -13,10 +11,6 @@ services:
       frontproxy_fnet:
         ipv4_address: 172.20.20.30
       backend:
-
-secrets:
-  github-pat:
-    file: ./secrets/github.pat
 
 volumes:
   graph-db:

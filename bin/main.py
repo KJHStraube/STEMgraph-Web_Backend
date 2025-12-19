@@ -16,6 +16,8 @@ LD_CONTEXT_TEMPLATE = os.path.join(TEMPLATE_DIR, 'ld-context.json')
 LD_METADATA_TEMPLATE = os.path.join(TEMPLATE_DIR, 'ld-metadata.json')
 DATABASE_DIR = os.environ.get('DATABASE_DIR', '/graph-db')
 LD_DATABASE = os.path.join(DATABASE_DIR, 'ld-database.json')
+NL_DATABASE = os.path.join(DATABASE_DIR, 'nl-database.json')
+
 
 # setup the api object
 app = FastAPI()
@@ -375,6 +377,7 @@ def refresh_challenge_db_task():
     uuid_pattern = re.compile(
         r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
     )
+    has_db_changed = False
     for r in repos:
         name = r['name']
         owner, branch = r['owner']['login'], r['default_branch']
@@ -398,16 +401,20 @@ def refresh_challenge_db_task():
                         'downloaded_at': int(time.time()),
                         'path': filename
                     }
+                    has_db_changed = True
             if not readme_text:
                 print("Skipped: no README")
             elif not json_obj:
                 print("Skipped: no valid JSON block")
             else:
                 print("Saved JSON for", name)
-    save_metadata(meta)
-    print("All metadata from STEMgraph challenges fetched.")
-    createdb_jsonld()
-    print("Database created as JSON-LD.")
+    if has_db_changed:
+        save_metadata(meta)
+        print("All metadata from STEMgraph challenges fetched.")
+        createdb_jsonld()
+        print("Database created as JSON-LD.")
+        createdb_jsonnl()
+        print("Database created as node-link JSON.")
 
 
 # routines to create the json-ld-database from the challenge-metadata files
@@ -423,7 +430,7 @@ def createdb_jsonld():
             file = os.path.join(STORAGE_DIR, fname)
             with open(file) as f:
                 challenge_metadata= json.load(f)
-            node = transform_challenge_metadata(challenge_metadata) 
+            node = transform_challenge_metadata_to_ld(challenge_metadata) 
             nodes.append(node)
     db_jsonld["@graph"] = nodes
     with open(LD_DATABASE, 'w', encoding='utf-8') as f:
@@ -444,7 +451,7 @@ def add_ld_metadata(db_jsonld):
     db_jsonld["generatedBy"]["schema:url"] = "https://github.com/STEMgraph/"
     db_jsonld["generatedAt"] = now()
 
-def transform_challenge_metadata(md_json):
+def transform_challenge_metadata_to_ld(md_json):
     """Transforms challenge metadata into a json-ld node."""
     node = {
         "@id": md_json["id"],
@@ -467,3 +474,53 @@ def transform_challenge_metadata(md_json):
     if "keywords" in md_json:
         node["keywords"] = md_json["keywords"]
     return node
+
+
+# routines to create the json-database from the challenge-metadata files
+# (for use with e.g. https://github.com/vasturiano/3d-force-graph)
+
+def createdb_jsonnl():
+    """Creates a node-link-structured .json from challenges' metadata."""
+    db_jsonnl = {"nodes": [], "links": []}
+    for fname in os.listdir(STORAGE_DIR):
+        if fname != 'metadata.json':
+            file = os.path.join(STORAGE_DIR, fname)
+            with open(file) as f:
+                challenge_metadata= json.load(f)
+            node = get_node_from_challenge_metadata(challenge_metadata) 
+            db_jsonnl["nodes"].append(node)
+            links = get_links_from_challenge_metadata(challenge_metadata)
+            db_jsonnl["links"].extend(links)
+    with open(NL_DATABASE, 'w', encoding='utf-8') as f:
+        json.dump(db_jsonnl, f, ensure_ascii=False, indent=2)
+
+def get_node_from_challenge_metadata(md_json):
+    """Transforms challenge metadata into a json node for node-link structure."""
+    node = {
+        "id": md_json["id"],
+        "type": "Exercise"
+    }
+    if "teaches" in md_json:
+        node["teaches"] = md_json["teaches"]
+    if "author" in md_json:
+        author_list = md_json["author"]
+        if isinstance(author_list, str):
+            author_list = [author_list]
+        node["author"] = author_list
+    if "first_used" in md_json:
+        node["publishedAt"] = md_json["first_used"]
+    if "keywords" in md_json:
+        node["keywords"] = md_json["keywords"]
+    return node
+
+def get_links_from_challenge_metadata(md_json):
+    """Transforms challenge metadata into json links for node-link structure."""
+    links = []
+    if "depends_on" in md_json:
+        for dep in md_json["depends_on"]:
+            link = {
+                "source": dep,
+                "target": md_json["id"]
+            }
+            links.append(link)
+    return links

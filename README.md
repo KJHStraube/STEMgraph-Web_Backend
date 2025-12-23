@@ -21,4 +21,4 @@ A FastAPI solution for [STEMgraph](https://github.com/STEMgraph).
 - Store the token as plain text in `secrets/github.pat`.
 - Run `docker compose up --build`.
 
-The API is now up and running at `http://localhost:8080/docs`.
+The API is now up and running at `http://localhost:8000/docs`.

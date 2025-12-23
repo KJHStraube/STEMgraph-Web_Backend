@@ -1,49 +1,44 @@
-# JSON-LD Structure: Exercise
+# JSON Structure: Exercise
 
-**Type:** `https://schema.org/LearningResource`  
-**Context:** `bin/ld-context.json`
+**Type:** `JSON`
 
-## Properties
+## Properties of the node part of the exercise
 
 | Field | Type | Multiplicity | Description |
 |-------|------|--------------|-------------|
-| `@id` | String | 1 | The exercise's UUID. |
-| `@type` | String | 1 | Always "Exercise". |
-| `learningResourceType` | String | 1 | The kind of exercise, e.g. workshop, handout or just exercise. |
-| `author` | Person | 1-n | The exercise's author(s). |
-| `publishedAt` | Date | 1 | The date the exercise was published. |
+| `id` | String | 1 | The exercise's UUID. |
+| `author` | String | 1-n | The name(s) of the exercise's author(s). |
 | `keywords` | String | 0-n | Tags describing the exercise's content. |
+| `learningResourceType` | String | 1 | The kind of exercise, e.g. workshop, handout or just exercise. |
+| `publishedAt` | Date | 1 | The date the exercise was published. |
 | `teaches` | String | 1 | The competency a person taking this exercise is expected to learn. |
-| `dependsOn` | String | 0-n | Exercises this one is based on. |
+| `title` | String | 1 | The exercise's name or title. |
 
-## structure of *author*'s list entries
-
-| Field | Type | Multiplicity | Description |
-|-------|------|--------------|-------------|
-| `@type` | Person | 1 | Always "Person". |
-| `name` | String | 1 | The author's name. |
-
-## structure of *dependsOn* alternatives
+## Properties of the link part(s) of the exercise
 
 | Field | Type | Multiplicity | Description |
 |-------|------|--------------|-------------|
-| `@type` | Class | 1 | Always "dependsOnAlternatives". |
-| `oneOf` | String | 2-n | List of alternative prerequisite exercises. |
+| `source` | String | 1-n | The UUID of a required exercise. |
+| `target` | String | 1 | This exercise's UUID. |
+
+### Comments
+
+- If the `source` of a link is a list of more than one exercise, any one exercise in the list `teaches` this exercise's skill and is sufficient as a requirement.
 
 ### Example
 
-```jsonld
+```json
 {
-  "@id": "f87c7e89-ece7-4c55-af54-16a3b3b7435f",
-  "@type": "Exercise",
-  "learningResourceType": "Exercise",
-  "author": [
-    {
-      "@type": "Person",
-      "name": "Stephan Bökelmann"
-    }
+  "id": "f87c7e89-ece7-4c55-af54-16a3b3b7435f",
+  "author": "Stephan Bökelmann",
+  "dependsOn": [
+    "302c98a7-cbea-435c-ada2-bbf7538429a2",
+    "81f2e303-d35c-4857-9cb7-190e3c5372b0",
+    [
+      "718193ef-11a1-408d-af23-4b10c24d490d",
+      "99787eda-617a-4a68-b9a4-d60ec5c5c303"
+    ]
   ],
-  "publishedAt": "2025-06-05",
   "keywords": [
     "C Compiler",
     "Inline Assembly",
@@ -52,16 +47,27 @@
     "Locals and Globals",
     "Primitive Types"
   ],
-  "teaches": "C Compiler: Working with Primitive Types and Inspecting Binaries",
-  "dependsOn": [
-    "302c98a7-cbea-435c-ada2-bbf7538429a2",
-    "81f2e303-d35c-4857-9cb7-190e3c5372b0",
-    {
-      "@type": "dependsOnAlternatives",
-      "oneOf": [
-        "718193ef-11a1-408d-af23-4b10c24d490d",
-        "99787eda-617a-4a68-b9a4-d60ec5c5c303"
-      ]
-    }
-  ]
+  "learningResourceType": "Exercise",
+  "publishedAt": "2025-06-05",
+  "teaches": "C basic types",
+  "title": "C Compiler: Working with Primitive Types and Inspecting Binaries"
+}
+
+```json
+{
+  {
+    "source": "302c98a7-cbea-435c-ada2-bbf7538429a2",
+    "target": "f87c7e89-ece7-4c55-af54-16a3b3b7435f"
+  },
+  {
+    "source": "81f2e303-d35c-4857-9cb7-190e3c5372b0",
+    "target": "f87c7e89-ece7-4c55-af54-16a3b3b7435f"
+  },
+  {
+    "source": [
+      "718193ef-11a1-408d-af23-4b10c24d490d",
+      "99787eda-617a-4a68-b9a4-d60ec5c5c303"
+    ],
+    "target": "f87c7e89-ece7-4c55-af54-16a3b3b7435f"
+  }
 }

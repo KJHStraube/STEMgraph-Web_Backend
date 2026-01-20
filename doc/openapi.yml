@@ -1,0 +1,14 @@
+openapi: 3.2.0
+info:
+  title: STEMgraph-API
+  version: 0.0.1
+paths:
+  /admin/database:
+    put:
+      summary: Refresh database
+      description: Updates exercise metadata cache and database.
+  /exercises:
+    get:
+      summary: Get all exercises
+      description: Retrieves a document with metadata for all exercises.
+

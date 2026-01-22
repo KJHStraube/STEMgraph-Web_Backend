@@ -1,0 +1,44 @@
+# Resources - Object Modeling
+
+- Exercises
+- Authors
+- Keywords
+- Database
+
+
+# Model URIs
+
+/exercises				// get all exercises
+/exercises/count			// get count of all exercises
+/exercises/{uuid}			// get exercise for given uuid
+/exercises/{uuid}/authors		// get all authors of exercise
+/exercises/{uuid}/authors/count		// get author count of exercise
+/exercises/{uuid}/dependencies		// get all dependencies of exercise
+/exercises/{uuid}/dependencies/count	// get dependency count of exercise
+/exercises/{uuid}/keywords		// get all keywords of exercise
+/exercises/{uuid}/keywords/count	// get keyword count of exercise
+/exercises/{uuid}/path-to		// get path (all exercises) leading to uuid
+
+/authors				// get all authors
+/authors/count				// get author count overall
+
+/keywords				// get all keywords
+/keywords/count				// get keyword count overall
+
+/database				// create (put?) new update-db task
+					// no db: create new; else update
+					// get: get statistics
+
+possible parameters for /exercises:
+- author={name}
+- dependency={uuid}
+- keyword={keyword}
+- topic={topic}
+- match=[exact|partial]
+- initial=[true|false]
+- final=[true|false]
+- format=[json-ld|json|xml|dot|neo4j|...]
+
+
+# Resource Representations
+

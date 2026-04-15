@@ -15,4 +15,8 @@ secrets:
     file: ./secrets/github.pat
 
 volumes:
+<<<<<<< HEAD
   graph-db:
+=======
+  graph-db:
+>>>>>>> 05225445323de609ea0e2528295fe963ff3fd888

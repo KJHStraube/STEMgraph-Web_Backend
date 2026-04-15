@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "@id": "https://stemgraph-api.boekelmann.net/getWholeGraph?format=json-ld",
   "generatedBy": {
     "@type": "schema:Organization",
@@ -7,3 +8,13 @@
   },
   "generatedAt": ""
 }
+=======
+  "@id": "https://stemgraph-api.boekelmann.net/",
+  "generatedBy": {
+    "@type": "schema:Organization",
+    "schema:name": "STEMgraph",
+    "schema:url": "https://github.com/STEMgraph/"
+  },
+  "generatedAt": ""
+}
+>>>>>>> 05225445323de609ea0e2528295fe963ff3fd888

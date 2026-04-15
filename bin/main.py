@@ -3,11 +3,10 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from collections import defaultdict
 from datetime import datetime
-import base64, copy, json, os, re, requests, time
+import base64, json, os, re, requests, time
 
 
 # initialize global variables
-
 ORG = os.environ['GITHUB_ORG']
 PAT_FILE = os.environ['GITHUB_PAT_FILE']
 STORAGE_DIR = os.environ.get('STORAGE_DIR', '/graph-db/repos')
@@ -17,6 +16,7 @@ LD_CONTEXT_TEMPLATE = os.path.join(TEMPLATE_DIR, 'ld-context.json')
 LD_METADATA_TEMPLATE = os.path.join(TEMPLATE_DIR, 'ld-metadata.json')
 DATABASE_DIR = os.environ.get('DATABASE_DIR', '/graph-db')
 LD_DATABASE = os.path.join(DATABASE_DIR, 'ld-database.json')
+<<<<<<< HEAD
 
 # --- to-do: check & put values into env-variables
 # DB_LOC = "/data/jsonld.json"
@@ -24,6 +24,8 @@ LD_DATABASE = os.path.join(DATABASE_DIR, 'ld-database.json')
 # with open(DB_LOC) as db_file:
 #    db = json.load(db_file)
 
+=======
+>>>>>>> 05225445323de609ea0e2528295fe963ff3fd888
 
 # setup the api object
 app = FastAPI()
@@ -39,7 +41,7 @@ def read_root():
 def get_author_count():
     """Returns all authors found along with their frequency."""
     authorCount = {}
-    add_graph_metadata(authorCount)
+    add_ld_metadata(authorCount)
     authorCount["authors"] = get_count("author", subfield="name", lowercase=False)
     return authorCount
 
@@ -47,7 +49,7 @@ def get_author_count():
 def get_author_list():
     """Returns a list with the names of all authors found in the database."""
     authorList = {}
-    add_graph_metadata(authorList)
+    add_ld_metadata(authorList)
     authorList["authors"] = get_list("author", subfield="name", lowercase=False)
     return authorList
 
@@ -101,7 +103,7 @@ def get_exercises_by_topic(topic: str):
 def get_keyword_count():
     """Returns all keywords found along with their frequency."""
     keywordCount = {}
-    add_graph_metadata(keywordCount)
+    add_ld_metadata(keywordCount)
     keywordCount["keywords"] = get_count("keywords")
     return keywordCount
 
@@ -109,7 +111,7 @@ def get_keyword_count():
 def get_keyword_list():
     """Returns a list with all keywords found in the database."""
     keywordList = {}
-    add_graph_metadata(keywordList)
+    add_ld_metadata(keywordList)
     keywordList["keywords"] = get_list("keywords")
     return keywordList
 
@@ -126,19 +128,56 @@ def get_path_to_exercise(uuid: str):
 def get_statistics():
     """Returns several statistics about the graph."""
     stats = {}
-    add_graph_metadata(stats)
+    add_ld_metadata(stats)
     stats["@type"] = "Statistics"
     stats["keywordCountDistinct"] = len(get_list("keywords"))
     stats["keywordCountTotal"] = sum(get_count("keywords").values())
-    stats["nodeCount"] = len(db["@graph"])
+    wholeGraph = get_whole_graph()
+    stats["nodeCount"] = len(wholeGraph["@graph"])
     return stats
 
 @app.get("/getWholeGraph")
 def get_whole_graph():
     """Returns the whole graph, i.e. database."""
-    wholeGraph = copy.deepcopy(db)
-    wholeGraph["generatedAt"] = now()
+    with open(LD_DATABASE, 'r', encoding='utf-8') as f:
+        wholeGraph = json.load(f)
     return wholeGraph 
+
+@app.get("/getStartNodes")
+def get_start_nodes():
+    """Returns all nodes that have no dependencies (entry points / starting lessons)."""
+    # Start Nodes = Nodes ohne dependsOn (keine Voraussetzungen)
+    starts = init_graph()
+    db = get_whole_graph()
+    for ex in db["@graph"]:
+        deps = ex.get("dependsOn", [])
+        if not deps or len(deps) == 0:
+            starts["@graph"].append(ex)
+    return starts
+
+@app.get("/getEndNodes")
+def get_end_nodes():
+    """Returns all nodes that are not referenced by others (end points / final lessons)."""
+    # Sammle alle IDs die als Dependency referenziert werden
+    referenced_ids = set()
+    db = get_whole_graph()
+    for ex in db["@graph"]:
+        if ex.get("dependsOn"):
+            for dep in ex["dependsOn"]:
+                if isinstance(dep, str):
+                    referenced_ids.add(dep)
+                elif isinstance(dep, dict):
+                    if dep.get("@id"):
+                        referenced_ids.add(dep["@id"])
+                    if dep.get("oneOf"):
+                        for alt in dep["oneOf"]:
+                            referenced_ids.add(alt)
+    # End Nodes = Nodes die von niemandem referenziert werden
+    ends = init_graph()
+    for ex in db["@graph"]:
+        if ex["@id"] not in referenced_ids:
+            ends["@graph"].append(ex)
+    return ends
 
 @app.post("/refreshDatabase")
 async def refresh_database(background_tasks: BackgroundTasks):
@@ -151,8 +190,8 @@ async def refresh_database(background_tasks: BackgroundTasks):
 def init_graph():
     """Returns an empty graph framework."""
     graph = {}
-    add_graph_context(graph)
-    add_graph_metadata(graph)
+    add_ld_context(graph)
+    add_ld_metadata(graph)
     graph["@graph"] = []
     return graph
 
@@ -164,6 +203,7 @@ def get_count(field: str, subfield: str = None, lowercase: bool = True):
     - lowercase: normalize values to lowercase if True
     """
     counts = defaultdict(int)
+    db = get_whole_graph()
     for ex in db["@graph"]:
         if ex.get(field) is not None:
             field_values = ex[field]
@@ -187,6 +227,7 @@ def get_list(field: str, subfield: str = None, lowercase: bool = True):
     - lowercase: normalize values to lowercase if True
     """
     values = set()
+    db = get_whole_graph()
     for ex in db["@graph"]:
         if ex.get(field) is not None:
             field_values = ex[field]
@@ -214,6 +255,7 @@ def get_exercises_by_tag(field: str, search: str, subfield: str = None, match: s
     if lowercase:
         search = search.lower()
     exTagged = init_graph()
+    db = get_whole_graph()
     for ex in db["@graph"]:
         if ex.get(field) is not None:
             field_values = ex[field]
@@ -238,6 +280,7 @@ def get_exercises_by_tag(field: str, search: str, subfield: str = None, match: s
 
 def get_exercise_node(uuid: str):
     """Get the list element with the given uuid as @id."""
+    db = get_whole_graph()
     for ex in db["@graph"]:
         if ex["@id"] == uuid:
             return ex
@@ -265,21 +308,6 @@ def add_exercise(data, uuid, visited):
         if ex is not None:
             data["@graph"].append(ex)
             expand_dependencies(data, ex, visited)
-
-def add_graph_context(data):
-    """Gets context data from local context file and adds it to the data."""
-    with open(CONTEXT_LOC) as context_file:
-        context = json.load(context_file)
-    data["@context"] = context["@context"]
-
-def add_graph_metadata(data):
-    """Adds metadata (url, created at & by) to the data."""
-    data["@id"] = "https://example.com/"
-    data["generatedBy"] = {}
-    data["generatedBy"]["@type"] = "schema:Organization"
-    data["generatedBy"]["schema:name"] = "STEMgraph API"
-    data["generatedBy"]["schema:url"] = "https://github.com/STEMgraph/API"
-    data["generatedAt"] = now()
 
 
 # lightweight and error functions
@@ -347,8 +375,8 @@ def ensure_metadata():
     return {}
 
 def save_metadata(m):
-    with open(METADATA_FILE, 'w') as f:
-        json.dump(m, f)
+    with open(METADATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(m, f, ensure_ascii=False, indent=2)
 
 def refresh_challenge_db_task():
     token = get_pat()
@@ -373,7 +401,7 @@ def refresh_challenge_db_task():
                     filename = os.path.join(STORAGE_DIR, f'{name}__{sha}.json')
                     tmp = filename + '.tmp'
                     with open(tmp, 'w', encoding='utf-8') as f:
-                        json.dump(json_obj, f)
+                        json.dump(json_obj, f, ensure_ascii=False, indent=2)
                     os.replace(tmp, filename)
                     meta[name] = {
                         'sha': sha,
@@ -387,3 +415,65 @@ def refresh_challenge_db_task():
             else:
                 print("Saved JSON for", name)
     save_metadata(meta)
+    print("All metadata from STEMgraph challenges fetched.")
+    createdb_jsonld()
+    print("Database created as JSON-LD.")
+
+
+# routines to create the json-ld-database from the challenge-metadata files
+
+def createdb_jsonld():
+    """Creates challenges-ld.json from challenges' metadata."""
+    db_jsonld = {}
+    add_ld_context(db_jsonld)
+    add_ld_metadata(db_jsonld)
+    nodes = []
+    for fname in os.listdir(STORAGE_DIR):
+        if fname != 'metadata.json':
+            file = os.path.join(STORAGE_DIR, fname)
+            with open(file) as f:
+                challenge_metadata= json.load(f)
+            node = transform_challenge_metadata(challenge_metadata) 
+            nodes.append(node)
+    db_jsonld["@graph"] = nodes
+    with open(LD_DATABASE, 'w', encoding='utf-8') as f:
+        json.dump(db_jsonld, f, ensure_ascii=False, indent=2)
+
+def add_ld_context(db_jsonld):
+    """Gets context data from local context file."""
+    with open(LD_CONTEXT_TEMPLATE) as context_file:
+        context = json.load(context_file)
+    db_jsonld["@context"] = context["@context"]
+
+def add_ld_metadata(db_jsonld):
+    """Creates metadata (url, created at & by)."""
+    db_jsonld["@id"] = "https://stemgraph-api.boekelmann.net/"
+    db_jsonld["generatedBy"] = {}
+    db_jsonld["generatedBy"]["@type"] = "schema:Organization"
+    db_jsonld["generatedBy"]["schema:name"] = "STEMgraph"
+    db_jsonld["generatedBy"]["schema:url"] = "https://github.com/STEMgraph/"
+    db_jsonld["generatedAt"] = now()
+
+def transform_challenge_metadata(md_json):
+    """Transforms challenge metadata into a json-ld node."""
+    node = {
+        "@id": md_json["id"],
+        "@type": "Exercise",
+        "learningResourceType": "Exercise"
+    }
+    if "teaches" in md_json:
+        node["teaches"] = md_json["teaches"]
+    if "depends_on" in md_json:
+        node["dependsOn"] = md_json["depends_on"]
+    if "author" in md_json:
+        author_list = md_json["author"]
+        if isinstance(author_list, str):
+            author_list = [author_list]
+        node["author"] = []
+        for author in author_list:
+            node["author"].append({"@type": "Person", "name": author})
+    if "first_used" in md_json:
+        node["publishedAt"] = md_json["first_used"]
+    if "keywords" in md_json:
+        node["keywords"] = md_json["keywords"]
+    return node
